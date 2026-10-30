@@ -4,6 +4,7 @@ import type { ManagedParseIssue } from "../domain/managed/managedArtifact.js";
 import type { ManagedMetadataLayout } from "./ManagedMetadataLayout.js";
 import {
   createDeclaringTypeLookup,
+  selectedMetadataRows,
   signature,
   type FieldCore,
   type ManagedCallEdge,
@@ -30,6 +31,7 @@ export const parseFields = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
   ranges: readonly TypeRange[],
+  selectedRows?: readonly number[],
 ): {
   readonly fields: readonly ManagedField[];
   readonly core: ReadonlyMap<string, FieldCore>;
@@ -40,7 +42,7 @@ export const parseFields = (
   const issues: ManagedParseIssue[] = [];
   const table = layout.table(4);
   const declaringType = createDeclaringTypeLookup(ranges, "field");
-  for (let row = 1; row <= (table?.rowCount ?? 0); row += 1) {
+  for (const row of selectedMetadataRows(table?.rowCount ?? 0, selectedRows)) {
     readManagedValue(() => {
       const cursor = metadataRowCursor(bytes, layout, 4, row);
       const flags = cursor.readUInt16();
@@ -76,6 +78,7 @@ export const parseFields = (
 export const parseMemberRefs = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
+  selectedRows?: readonly number[],
 ): {
   readonly refs: readonly ManagedMemberRef[];
   readonly core: ReadonlyMap<string, MemberRefCore>;
@@ -85,7 +88,7 @@ export const parseMemberRefs = (
   const core = new Map<string, MemberRefCore>();
   const issues: ManagedParseIssue[] = [];
   const table = layout.table(10);
-  for (let row = 1; row <= (table?.rowCount ?? 0); row += 1) {
+  for (const row of selectedMetadataRows(table?.rowCount ?? 0, selectedRows)) {
     readManagedValue(() => {
       const cursor = metadataRowCursor(bytes, layout, 10, row);
       const parentRaw = cursor.readIndex(
@@ -143,6 +146,8 @@ interface ParseMethodsInput {
   readonly layout: ManagedMetadataLayout;
   readonly pe: ManagedPeLayout;
   readonly ranges: readonly TypeRange[];
+  readonly selectedRows?: readonly number[] | undefined;
+  readonly includeMethodBodies?: boolean;
 }
 
 export const parseMethods = ({
@@ -150,6 +155,8 @@ export const parseMethods = ({
   layout,
   pe,
   ranges,
+  selectedRows,
+  includeMethodBodies = true,
 }: ParseMethodsInput): {
   readonly methods: readonly ManagedMethod[];
   readonly core: ReadonlyMap<string, MethodCore>;
@@ -160,7 +167,7 @@ export const parseMethods = ({
   const issues: ManagedParseIssue[] = [];
   const table = layout.table(6);
   const declaringType = createDeclaringTypeLookup(ranges, "method");
-  for (let row = 1; row <= (table?.rowCount ?? 0); row += 1) {
+  for (const row of selectedMetadataRows(table?.rowCount ?? 0, selectedRows)) {
     readManagedValue(() => {
       const cursor = metadataRowCursor(bytes, layout, 6, row);
       const rva = cursor.readUInt32();
@@ -191,13 +198,33 @@ export const parseMethods = ({
         impl_flags: implFlags,
         flags,
         signature: budgetedSignature(sig, layout),
-        body: methodBody(
-          bytes,
-          pe,
-          rva,
-          { implFlags, flags },
-          managedDecodeBudget(layout),
-        ),
+        body: includeMethodBodies
+          ? methodBody(
+              bytes,
+              pe,
+              rva,
+              { implFlags, flags },
+              managedDecodeBudget(layout),
+            )
+          : {
+              status: "unavailable",
+              header_format: "unknown",
+              rva,
+              file_offset: null,
+              max_stack: null,
+              init_locals: null,
+              local_var_sig_token: null,
+              il_size: 0,
+              il_sha256: null,
+              normalized_il_sha256: null,
+              instruction_count: 0,
+              decoded_instruction_count: 0,
+              truncated_instructions: 0,
+              opcode_counts: {},
+              anchors: [],
+              exception_regions: [],
+              issue: "Method body decoding was not requested.",
+            },
       });
       core.set(token, {
         token,
@@ -207,6 +234,48 @@ export const parseMethods = ({
     }, issues);
   }
   return { methods, core, issues };
+};
+
+/** Names used by selected CIL do not require decoding the referenced member body. */
+export const referencedMemberNames = (
+  bytes: Buffer,
+  layout: ManagedMetadataLayout,
+  rows: {
+    readonly methods: readonly number[];
+    readonly fields: readonly number[];
+  },
+  issues: ManagedParseIssue[],
+): {
+  readonly methods: ReadonlyMap<string, MethodCore>;
+  readonly fields: ReadonlyMap<string, FieldCore>;
+} => {
+  managedDecodeBudget(layout).reserve(
+    (rows.methods.length + rows.fields.length) * 128,
+    layout.rootOffset,
+  );
+  const methods = new Map<string, MethodCore>();
+  const fields = new Map<string, FieldCore>();
+  const name = (table: number, row: number, skip: number): string => {
+    const cursor = metadataRowCursor(bytes, layout, table, row);
+    for (let index = 0; index < skip; index += 2) cursor.readUInt16();
+    return readMetadataString(
+      bytes,
+      layout,
+      cursor.readIndex(layout.stringIndexSize),
+      layout.strings.size,
+    );
+  };
+  for (const row of rows.methods)
+    readManagedValue(() => {
+      const token = metadataToken(6, row);
+      methods.set(token, { token, name: name(6, row, 8), declaringType: null });
+    }, issues);
+  for (const row of rows.fields)
+    readManagedValue(() => {
+      const token = metadataToken(4, row);
+      fields.set(token, { token, name: name(4, row, 2) });
+    }, issues);
+  return { methods, fields };
 };
 
 const targetKind = (token: string): ManagedCallEdge["target_kind"] =>

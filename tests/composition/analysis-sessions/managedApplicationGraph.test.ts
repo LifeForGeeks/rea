@@ -6,6 +6,7 @@ import { MANAGED_APPLICATION_GRAPH_EXAMPLE } from "../../../src/contracts/manage
 import { traceApplicationFeatureEvidence } from "../../../src/application/javascript/JavaScriptApplicationWorkflowService.js";
 import { MANAGED_STATIC_PROVIDER } from "../../../src/application/InvestigationProviders.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
+import { jsonValueSchema } from "../../../src/domain/jsonValue.js";
 import { parseJavaScriptApplicationGraph } from "../../../src/domain/javascript/javascriptApplicationGraph.js";
 import { managedApplicationGraphResultSchema } from "../../../src/domain/managed/managedApplicationGraph.js";
 import {
@@ -45,7 +46,7 @@ const createManagedInteropEvidence = () => {
     memberEvidence: createEvidence(binary, MANAGED_STATIC_PROVIDER, {
       operation: "inspect_managed_members",
       parameters: {},
-      result: members,
+      result: jsonValueSchema.parse(members),
       rawResult: null,
       limitations: members.limitations,
       locations: [{ kind: "artifact-path", path: binary.path }],
@@ -216,14 +217,14 @@ describe("managed application graph coverage", () => {
     const mismatched = createEvidence(binary, MANAGED_STATIC_PROVIDER, {
       operation: "inspect_managed_members",
       parameters: {},
-      result: {
+      result: jsonValueSchema.parse({
         ...members,
         artifact: { ...members.artifact, sha256: "b".repeat(64) },
         identity_scope: {
           ...members.identity_scope,
           requires_artifact_sha256: "b".repeat(64),
         },
-      },
+      }),
     });
     const rejected = projectManagedApplicationGraphEvidence({
       managed_members: mismatched,
@@ -316,7 +317,7 @@ it("normalizes MVID casing for node identity while preserving observed values", 
   const uppercaseMembers = createEvidence(undefined, MANAGED_STATIC_PROVIDER, {
     operation: "inspect_managed_members",
     parameters: {},
-    result: {
+    result: jsonValueSchema.parse({
       ...members,
       module: {
         ...members.module,
@@ -328,7 +329,7 @@ it("normalizes MVID casing for node identity while preserving observed values", 
         ...members.identity_scope,
         requires_mvid: uppercaseMvid,
       },
-    },
+    }),
     rawResult: null,
     limitations: members.limitations,
   });
@@ -422,13 +423,13 @@ describe("managed application graph module identity consistency", () => {
       {
         operation: "inspect_managed_members",
         parameters: {},
-        result: {
+        result: jsonValueSchema.parse({
           ...members,
           module: {
             ...members.module,
             generation: members.module.generation + 1,
           },
-        },
+        }),
         rawResult: null,
         limitations: members.limitations,
       },
@@ -460,13 +461,13 @@ describe("managed application graph token scope", () => {
       {
         operation: "inspect_managed_members",
         parameters: {},
-        result: {
+        result: jsonValueSchema.parse({
           ...members,
           identity_scope: {
             ...members.identity_scope,
             requires_mvid: wrongMvidValue,
           },
-        },
+        }),
         rawResult: null,
         limitations: members.limitations,
       },
@@ -477,13 +478,13 @@ describe("managed application graph token scope", () => {
       {
         operation: "inspect_managed_members",
         parameters: {},
-        result: {
+        result: jsonValueSchema.parse({
           ...members,
           identity_scope: {
             ...members.identity_scope,
             requires_artifact_sha256: "b".repeat(64),
           },
-        },
+        }),
         rawResult: null,
         limitations: members.limitations,
       },
@@ -521,7 +522,7 @@ describe("unknown managed application graph token scope", () => {
     const unknownMembers = createEvidence(undefined, MANAGED_STATIC_PROVIDER, {
       operation: "inspect_managed_members",
       parameters: {},
-      result: {
+      result: jsonValueSchema.parse({
         ...members,
         module:
           members.module === null
@@ -533,7 +534,7 @@ describe("unknown managed application graph token scope", () => {
                 enc_base_id: null,
               },
         identity_scope: { ...members.identity_scope, requires_mvid: null },
-      },
+      }),
       rawResult: null,
       limitations: members.limitations,
     });
@@ -604,7 +605,7 @@ describe("managed application graph coverage", () => {
       {
         operation: "inspect_managed_members",
         parameters: {},
-        result: parserPartialMembers,
+        result: jsonValueSchema.parse(parserPartialMembers),
         rawResult: null,
         limitations: parserPartialMembers.limitations,
       },

@@ -13,6 +13,7 @@ import { managedStaticCapabilities } from "./ManagedStaticProviderMetadata.js";
 import { MANAGED_STATIC_PROVIDER } from "../application/InvestigationProviders.js";
 import {
   MANAGED_TOOL_CONTRACTS,
+  managedMemberInputSchema,
   managedTargetInputSchema,
   type ManagedToolName,
 } from "../contracts/managed/managedToolContracts.js";
@@ -24,6 +25,7 @@ import {
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
+import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import type { EvidenceLocation } from "../domain/evidence.js";
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -235,14 +237,29 @@ const inspectManagedOperation = (
   | ManagedArtifactInspection
   | ManagedMemberInspection
   | ManagedNativeBoundaryInspection => {
+  if (operation === "inspect_managed_members") {
+    const input = managedMemberInputSchema.safeParse(parameters);
+    if (!input.success)
+      throw analysisInputErrorFromIssues(
+        operation,
+        input.error.issues,
+        parameters,
+        {
+          cause: input.error,
+        },
+      );
+    const { path: _path, ...selection } = input.data;
+    return inspectManagedMembersBytes(
+      bytes,
+      target,
+      Object.keys(selection).length === 0 ? undefined : selection,
+    );
+  }
   managedTargetInputSchema.parse(parameters);
   if (operation === "inspect_managed_artifact") {
     return inspectManagedArtifactBytes(bytes, target);
   }
-  if (operation === "inspect_managed_native_boundaries") {
-    return inspectManagedNativeBoundariesBytes(bytes, target);
-  }
-  return inspectManagedMembersBytes(bytes, target);
+  return inspectManagedNativeBoundariesBytes(bytes, target);
 };
 
 const managedLocations = (

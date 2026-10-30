@@ -91,7 +91,7 @@ describe("managed member comparison subject identity", () => {
       {
         operation: "inspect_managed_members",
         parameters: {},
-        result: inspection,
+        result: jsonValueSchema.parse(inspection),
       },
     );
     const unavailableSubject = createEvidence(
@@ -104,7 +104,7 @@ describe("managed member comparison subject identity", () => {
       {
         operation: "inspect_managed_members",
         parameters: {},
-        result: inspection,
+        result: jsonValueSchema.parse(inspection),
       },
     );
 

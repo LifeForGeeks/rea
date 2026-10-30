@@ -43,6 +43,17 @@ describe("managed static provider path boundary", () => {
       field_accesses: [expect.objectContaining({ field_name: "counter" })],
     });
     const memberResult = asManagedMemberResult(members.value);
+    expect(memberResult.selection).toBeUndefined();
+    const invalidSelection = await client.execute("inspect_managed_members", {
+      method_tokens: ["0x02000001"],
+    });
+    expect(invalidSelection).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisInputError",
+        issues: [{ path: ["method_tokens", 0], reason: "invalid_format" }],
+      },
+    });
     expect(members.value.locations).toEqual(
       expect.arrayContaining(
         memberResult.methods.flatMap((method) =>

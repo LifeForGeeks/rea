@@ -24,6 +24,46 @@ cliTest(
         methods: [expect.objectContaining({ token: expect.any(String) })],
       },
     });
+    const selected = await cli.run({
+      arguments: [
+        ...argv,
+        "--type-names",
+        "Fixture.Program",
+        "--method-tokens",
+        "0x06000001",
+        "--include-method-bodies=false",
+        "--type-offset",
+        "0",
+        "--type-limit",
+        "1",
+      ],
+    });
+    expect(selected.exitCode).toBe(0);
+    expect(selected.json).toMatchObject({
+      parameters: {
+        type_names: ["Fixture.Program"],
+        method_tokens: ["0x06000001"],
+        include_method_bodies: false,
+        type_offset: 0,
+        type_limit: 1,
+      },
+      normalized_result: {
+        selection: {
+          total_matching_types: 1,
+          returned_types: 1,
+          next_type_offset: null,
+        },
+        types: [{ full_name: "Fixture.Program" }],
+        methods: [
+          {
+            token: "0x06000001",
+            body: { status: "unavailable", il_sha256: null },
+          },
+        ],
+        call_edges: [],
+        field_accesses: [],
+      },
+    });
     const filtered = await cli.run({
       arguments: [...argv, "--filter-output", "operation", "--full-output"],
     });

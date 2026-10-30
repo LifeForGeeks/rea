@@ -17,7 +17,10 @@ import {
   readMetadataGuid,
   readMetadataString,
 } from "./ManagedMetadataHeaps.js";
-import { managedFailure } from "./ManagedReaderFailure.js";
+import {
+  managedFailure,
+  ManagedReaderFailure,
+} from "./ManagedReaderFailure.js";
 import type { ManagedResourceDirectory } from "./ManagedMetadataInventory.js";
 
 type ModuleIdentity = NonNullable<ManagedArtifactInspection["module"]>;
@@ -235,6 +238,11 @@ const readTypeName = ({
   return namespace.length === 0 ? name : `${namespace}.${name}`;
 };
 
+const methodStartsByLayout = new WeakMap<
+  ManagedMetadataLayout,
+  Uint32Array | ManagedReaderFailure
+>();
+
 const declaringTypeForMethod = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
@@ -243,30 +251,50 @@ const declaringTypeForMethod = (
 ): string | null => {
   const types = layout.table(2);
   const methods = layout.table(6);
-  if (types === undefined || methods === undefined) return null;
-  for (let row = 1; row <= types.rowCount; row += 1) {
-    const cursor = metadataRowCursor(bytes, layout, 2, row);
-    cursor.readUInt32();
-    const nameIndex = cursor.readIndex(layout.stringIndexSize);
-    const namespaceIndex = cursor.readIndex(layout.stringIndexSize);
-    cursor.readIndex(layout.codedIndexSize("TypeDefOrRef"));
-    cursor.readIndex(layout.tableIndexSize(4));
-    const methodStart = cursor.readIndex(layout.tableIndexSize(6));
-    const methodEnd =
-      row === types.rowCount
-        ? methods.rowCount + 1
-        : methodListForType(bytes, layout, row + 1);
-    if (methodRow < methodStart || methodRow >= methodEnd) continue;
-    const name = readMetadataString(bytes, layout, nameIndex, heapExtent);
-    const namespace = readMetadataString(
-      bytes,
-      layout,
-      namespaceIndex,
-      heapExtent,
-    );
-    return namespace.length === 0 ? name : `${namespace}.${name}`;
+  if (
+    types === undefined ||
+    methods === undefined ||
+    methodRow < 1 ||
+    methodRow > methods.rowCount
+  )
+    return null;
+  let starts = methodStartsByLayout.get(layout);
+  if (starts instanceof ManagedReaderFailure) throw starts;
+  if (starts === undefined) {
+    try {
+      managedDecodeBudget(layout).reserve(types.rowCount * 4, types.offset);
+      starts = new Uint32Array(types.rowCount);
+      let previous = 1;
+      for (let row = 1; row <= types.rowCount; row += 1) {
+        const start = methodListForType(bytes, layout, row);
+        if (start < previous || start > methods.rowCount + 1)
+          throw managedFailure(
+            "invalid-row",
+            `metadata.TypeDef:${metadataToken(2, row)}`,
+            "TypeDef method ownership ranges must be ordered and within the MethodDef table",
+            metadataRowOffset(layout, 2, row),
+          );
+        starts[row - 1] = start;
+        previous = start;
+      }
+      methodStartsByLayout.set(layout, starts);
+    } catch (cause: unknown) {
+      if (cause instanceof ManagedReaderFailure)
+        methodStartsByLayout.set(layout, cause);
+      throw cause;
+    }
   }
-  return null;
+  // Upper bound chooses the last equal start, skipping types with no methods.
+  let low = 0;
+  let high = starts.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((starts[middle] ?? 0) <= methodRow) low = middle + 1;
+    else high = middle;
+  }
+  return low === 0
+    ? null
+    : readTypeName({ bytes, layout, table: 2, row: low, heapExtent });
 };
 
 const methodListForType = (

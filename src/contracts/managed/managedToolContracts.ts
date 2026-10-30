@@ -6,6 +6,7 @@ import { managedOutputSchemas } from "../toolOutputSchemaGroups.js";
 import { toolContractMetadata } from "../toolEffects.js";
 import { requireOutputSchema } from "../toolOutputSchemaPrimitives.js";
 import { localPathStringSchema } from "../../domain/localPath.js";
+import { managedMemberSelectionOptionsSchema } from "../../domain/managed/managedArtifact.js";
 
 /** Exact caller boundary for execution-free PE/CLI triage and identity. */
 export const managedTargetInputSchema = z.strictObject({
@@ -19,6 +20,11 @@ export const managedTargetInputSchema = z.strictObject({
     )
     .optional(),
 });
+
+/** Exact member-selection boundary, independent of other managed operations. */
+export const managedMemberInputSchema = managedTargetInputSchema.extend(
+  managedMemberSelectionOptionsSchema.shape,
+);
 
 const outputSchema = requireOutputSchema(
   managedOutputSchemas,
@@ -54,14 +60,22 @@ export const MANAGED_TOOL_CONTRACTS = [
     name: "inspect_managed_members",
     ...toolContractMetadata("inspect_managed_members"),
     description:
-      "Inspect PE/CLI metadata members, signatures, raw CIL hashes, decoded-instruction-tuple hashes, separately reported exception regions, call edges, and field-access anchors without loading or executing target code. Metadata tokens are reported as build-local coordinates bound to the artifact SHA-256 and MVID; the tuple hash does not resolve them or fully commit control flow.",
+      "Inspect PE/CLI metadata members, signatures, raw CIL hashes, decoded-instruction-tuple hashes, separately reported exception regions, call edges, and field-access anchors without loading or executing target code. Select exact type names or MethodDef tokens, page matching types, or omit method bodies for metadata discovery. Metadata tokens are build-local coordinates bound to artifact SHA-256 and MVID; the tuple hash does not resolve them or fully commit control flow.",
     kind: "managed-provider",
-    inputSchema: managedTargetInputSchema,
+    inputSchema: managedMemberInputSchema,
     outputSchema: memberOutputSchema,
     examples: [
       {
         title: "Example inspect managed members request",
         input: {},
+      },
+      {
+        title: "Inspect a type without decoding method bodies",
+        input: {
+          type_names: ["Example.Program"],
+          include_method_bodies: false,
+          type_limit: 1,
+        },
       },
     ],
   },

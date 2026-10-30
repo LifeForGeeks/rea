@@ -51,6 +51,7 @@ export const registerManagedTools = (
       const execution = await runManagedProviderExecution(
         path,
         operation,
+        parameters,
         executionOptions?.signal,
       );
       if (execution.ok && typeof requestedPath === "string")

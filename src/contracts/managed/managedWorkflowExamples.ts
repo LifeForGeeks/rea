@@ -1,4 +1,5 @@
 import { createEvidence } from "../../domain/evidence.js";
+import { jsonValueSchema } from "../../domain/jsonValue.js";
 import type {
   ManagedMemberInspection,
   ManagedNativeBoundaryInspection,
@@ -60,7 +61,7 @@ const evidence = (result: ManagedMemberInspection) =>
   createEvidence(undefined, MANAGED_STATIC_EXAMPLE_PROVIDER, {
     operation: "inspect_managed_members",
     parameters: {},
-    result,
+    result: jsonValueSchema.parse(result),
     rawResult: null,
     limitations: result.limitations,
   });

@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 
 interface ManagedPeFixtureOptions {
+  readonly additionalTypes?: readonly {
+    readonly name: string;
+    readonly methodName: string;
+    readonly ilBody: Buffer;
+  }[];
   readonly cliFlags?: number;
   readonly corruptMetadataSignature?: boolean;
   readonly customAttributeTypeRaw?: number;
@@ -457,6 +462,11 @@ interface FixtureMetadataRowContext {
   readonly methodRva: number;
   readonly referenceStringIndexes: readonly number[];
   readonly indexes: {
+    readonly additionalTypes: readonly {
+      readonly name: number;
+      readonly methodName: number;
+      readonly bodyOffset: number;
+    }[];
     readonly moduleName: number;
     readonly assemblyName: number;
     readonly attributeName: number;
@@ -529,9 +539,9 @@ const fixtureIndexWidths = ({
   const rowCounts = new Map<number, number>([
     [0, options.moduleRowCount ?? 1],
     [1, 1],
-    [2, 1],
+    [2, 1 + indexes.additionalTypes.length],
     [4, 1],
-    [6, 1],
+    [6, 1 + indexes.additionalTypes.length],
     [8, 0],
     [10, 1],
     [12, options.targetFramework === null ? 0 : 1],
@@ -565,6 +575,41 @@ const fixtureIndexWidths = ({
   };
 };
 
+const fixtureTypeRows = (
+  {
+    options,
+    indexes,
+    heapSizes,
+  }: Pick<FixtureMetadataRowContext, "options" | "indexes" | "heapSizes">,
+  widths: FixtureIndexWidths,
+): readonly Buffer[] => [
+  typeDefRow({
+    name: indexes.typeName,
+    namespace: indexes.typeNamespace,
+    fieldList: 1,
+    methodList: 1,
+    stringSize: heapSizes.strings,
+    typeDefOrRefSize: widths.typeDefOrRef,
+    fieldListSize: widths.table(4),
+    methodListSize: widths.table(6),
+    ...(options.extendsRaw === undefined
+      ? {}
+      : { extendsRaw: options.extendsRaw }),
+  }),
+  ...indexes.additionalTypes.map((type, index) =>
+    typeDefRow({
+      name: type.name,
+      namespace: indexes.typeNamespace,
+      fieldList: 2,
+      methodList: index + 2,
+      stringSize: heapSizes.strings,
+      typeDefOrRefSize: widths.typeDefOrRef,
+      fieldListSize: widths.table(4),
+      methodListSize: widths.table(6),
+    }),
+  ),
+];
+
 const fixtureMetadataRows = ({
   options,
   methodRva,
@@ -597,24 +642,7 @@ const fixtureMetadataRows = ({
         ),
       ],
     ],
-    [
-      2,
-      [
-        typeDefRow({
-          name: indexes.typeName,
-          namespace: indexes.typeNamespace,
-          fieldList: 1,
-          methodList: 1,
-          stringSize: heapSizes.strings,
-          typeDefOrRefSize: widths.typeDefOrRef,
-          fieldListSize: widths.table(4),
-          methodListSize: widths.table(6),
-          ...(options.extendsRaw === undefined
-            ? {}
-            : { extendsRaw: options.extendsRaw }),
-        }),
-      ],
-    ],
+    [2, fixtureTypeRows({ options, indexes, heapSizes }, widths)],
     [
       4,
       [
@@ -638,6 +666,17 @@ const fixtureMetadataRows = ({
           rva: methodRva,
           flags: options.pinvoke === undefined ? 0x0016 : 0x2016,
         }),
+        ...indexes.additionalTypes.map((type) =>
+          methodDefRow({
+            name: type.methodName,
+            signature: indexes.methodSignature,
+            stringSize: heapSizes.strings,
+            blobSize: heapSizes.blobs,
+            parameterSize: widths.table(8),
+            rva: methodRva + type.bodyOffset,
+            flags: 0x0016,
+          }),
+        ),
       ],
     ],
     [
@@ -727,6 +766,16 @@ const buildManagedFixtureMetadata = (
   const typeNamespace = strings.add(options.typeNamespace ?? "Fixture");
   const fieldName = strings.add(options.fieldName ?? "counter");
   const methodName = strings.add(options.methodName ?? "Main");
+  let bodyOffset = align4(fixturePrimaryBody(options).length);
+  const additionalTypes = (options.additionalTypes ?? []).map((type) => {
+    const result = {
+      name: strings.add(type.name),
+      methodName: strings.add(type.methodName),
+      bodyOffset,
+    };
+    bodyOffset += align4(type.ilBody.length);
+    return result;
+  });
   const pinvokeModuleName =
     options.pinvoke === undefined
       ? null
@@ -763,6 +812,7 @@ const buildManagedFixtureMetadata = (
     methodRva,
     referenceStringIndexes,
     indexes: {
+      additionalTypes,
       moduleName,
       assemblyName,
       attributeName,
@@ -818,12 +868,14 @@ const buildManagedFixtureImage = (
   );
   const methodRva = 0x2000 + bodyOffset - 0x0200;
   const metadata = buildMetadata(methodRva);
-  const body =
-    options.ilBody ??
-    Buffer.from([
-      0x32, 0x02, 0x7b, 0x01, 0x00, 0x00, 0x04, 0x28, 0x01, 0x00, 0x00, 0x0a,
-      0x2a,
-    ]);
+  const body = Buffer.concat(
+    [
+      fixturePrimaryBody(options),
+      ...(options.additionalTypes ?? []).map((type) => type.ilBody),
+    ].map((part) =>
+      Buffer.concat([part, Buffer.alloc(align4(part.length) - part.length)]),
+    ),
+  );
   const legacyReadyToRunOffset = 0x0900;
   const metadataEnd = 0x0300 + metadata.length;
   const resourceEnd = resourceOffset + resourceDirectory.length;
@@ -899,6 +951,13 @@ const buildManagedFixtureImage = (
   resourceDirectory.copy(image, resourceOffset);
   return image;
 };
+
+const fixturePrimaryBody = (options: ManagedPeFixtureOptions): Buffer =>
+  options.ilBody ??
+  Buffer.from([
+    0x32, 0x02, 0x7b, 0x01, 0x00, 0x00, 0x04, 0x28, 0x01, 0x00, 0x00, 0x0a,
+    0x2a,
+  ]);
 
 /** Build a source-owned PE32/CLI fixture without committing compiled binaries. */
 export const buildManagedPeFixture = (

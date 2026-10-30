@@ -62,12 +62,6 @@ it("runs every managed static inspection independently of an active native targe
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
-    const managedMembersTool = (await client.listTools()).tools.find(
-      ({ name }) => name === "inspect_managed_members",
-    );
-    expect(managedMembersTool?.inputSchema).toMatchObject({
-      additionalProperties: false,
-    });
     const artifact = structured(
       await client.callTool({
         name: "inspect_managed_artifact",
@@ -151,6 +145,80 @@ it("runs every managed static inspection independently of an active native targe
   }
 }, 30_000);
 
+const verifyManagedSelection = async (
+  client: Client,
+  path: string,
+  outputAssertion: ManagedOutputAssertion,
+): Promise<void> => {
+  const managedMembersTool = outputAssertion.tools.find(
+    ({ name }) => name === "inspect_managed_members",
+  );
+  if (managedMembersTool === undefined)
+    throw new Error("Missing managed member tool");
+  const valid = new Ajv2020({ strict: false, validateFormats: false }).compile(
+    managedMembersTool.inputSchema,
+  );
+  const selection = {
+    type_names: ["Fixture.Program"],
+    method_tokens: ["0x06000001"],
+    include_method_bodies: false,
+    type_offset: 0,
+    type_limit: 1,
+  };
+  expect(valid({})).toBe(true);
+  expect(valid(selection)).toBe(true);
+  const selected = structured(
+    await client.callTool({
+      name: "inspect_managed_members",
+      arguments: selection,
+    }),
+  );
+  expect(selected).toMatchObject({
+    parameters: selection,
+    subject: { local_path: path },
+    normalized_result: {
+      selection: {
+        ...selection,
+        total_matching_types: 1,
+        returned_types: 1,
+        next_type_offset: null,
+      },
+      types: [{ full_name: "Fixture.Program" }],
+      methods: [{ token: "0x06000001", body: { status: "unavailable" } }],
+      call_edges: [],
+    },
+  });
+  outputAssertion.assert("inspect_managed_members", selected);
+  for (const invalid of [
+    { type_names: [] },
+    { type_names: [""] },
+    { method_tokens: ["0x02000001"] },
+    { include_method_bodies: "false" },
+    { type_limit: 0 },
+    { type_limit: 1.5 },
+    { type_offset: -1 },
+    { type_offset: 9007199254740992 },
+    { pth: path },
+  ]) {
+    expect(valid(invalid)).toBe(false);
+    const rejected = await client.callTool({
+      name: "inspect_managed_members",
+      arguments: invalid,
+    });
+    expect(rejected.isError).toBe(true);
+  }
+  for (const name of [
+    "inspect_managed_artifact",
+    "inspect_managed_native_boundaries",
+  ]) {
+    const rejected = await client.callTool({
+      name,
+      arguments: { type_limit: 1 },
+    });
+    expect(rejected.isError).toBe(true);
+  }
+};
+
 it("opens a managed PE and executes the managed static provider through MCP", async () => {
   const directory = await createTestTempDirectory("rea-managed-mcp-");
   const path = join(directory, "fixture.exe");
@@ -184,6 +252,7 @@ it("opens a managed PE and executes the managed static provider through MCP", as
       path,
       assertOutput,
     );
+    await verifyManagedSelection(client, path, assertOutput);
     await verifyManagedComparisonAndReconstruction(
       client,
       members,
@@ -462,6 +531,7 @@ const createOutputAssertion = async (client: Client) => {
     validateFormats: false,
   });
   return {
+    tools,
     names: tools.map(({ name }) => name),
     assert: (
       name: Parameters<typeof toolContract>[0],
@@ -471,9 +541,11 @@ const createOutputAssertion = async (client: Client) => {
       const wire = tools.find((tool) => tool.name === name);
       if (wire?.outputSchema === undefined)
         throw new Error(`Missing advertised output schema for ${name}`);
-      const valid = ajv.compile(
-        z.record(z.string(), z.unknown()).parse(wire.outputSchema),
-      );
+      const schema = z.record(z.string(), z.unknown()).parse(wire.outputSchema);
+      const valid =
+        (typeof schema.$id === "string"
+          ? ajv.getSchema(schema.$id)
+          : undefined) ?? ajv.compile(schema);
       expect(valid(output), `${name} advertised output`).toBe(true);
       expect(contract.outputSchema.safeParse(output).success).toBe(true);
     },

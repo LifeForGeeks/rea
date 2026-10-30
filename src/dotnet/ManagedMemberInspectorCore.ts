@@ -19,6 +19,7 @@ import {
   readMetadataString,
   sha256Bytes,
 } from "./ManagedMetadataHeaps.js";
+import { managedDecodeBudget } from "./ManagedDecodeBudget.js";
 
 export type ManagedType = ManagedMemberInspection["types"][number];
 export type ManagedField = ManagedMemberInspection["fields"][number];
@@ -63,6 +64,17 @@ export interface ParsedInstruction {
   readonly opcode: string;
   readonly operandKind: ManagedInstructionAnchor["operand_kind"];
   readonly operand: string | null;
+}
+
+export function* selectedMetadataRows(
+  count: number,
+  selectedRows?: readonly number[],
+): Iterable<number> {
+  if (selectedRows !== undefined) {
+    yield* selectedRows;
+    return;
+  }
+  for (let row = 1; row <= count; row += 1) yield row;
 }
 
 const rowRange = (
@@ -141,6 +153,10 @@ export const typeRanges = (
   issues: ManagedParseIssue[],
 ): readonly TypeRange[] => {
   const typeTable = layout.table(2);
+  managedDecodeBudget(layout).reserve(
+    (typeTable?.rowCount ?? 0) * 128,
+    typeTable?.offset ?? layout.rootOffset,
+  );
   const ranges: TypeRange[] = [];
   for (let row = 1; row <= (typeTable?.rowCount ?? 0); row += 1)
     ranges.push(readTypeRange(bytes, layout, row, issues));
@@ -201,6 +217,7 @@ export const parseTypes = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
   ranges: readonly TypeRange[],
+  selectedRows?: readonly number[],
 ): {
   readonly types: readonly ManagedType[];
   readonly issues: readonly ManagedParseIssue[];
@@ -210,7 +227,10 @@ export const parseTypes = (
   const methods = layout.table(6);
   const items: ManagedType[] = [];
   const issues: ManagedParseIssue[] = [];
-  for (let row = 1; row <= (typeTable?.rowCount ?? 0); row += 1) {
+  for (const row of selectedMetadataRows(
+    typeTable?.rowCount ?? 0,
+    selectedRows,
+  )) {
     readManagedValue(() => {
       const cursor = metadataRowCursor(bytes, layout, 2, row);
       const flags = cursor.readUInt32();

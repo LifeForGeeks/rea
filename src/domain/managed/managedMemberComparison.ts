@@ -213,6 +213,20 @@ export interface ManagedMemberComparisonSide {
   readonly result: ManagedMemberInspection;
 }
 
+/** Body omissions do not establish whether the metadata member inventory is scoped. */
+const completeMemberInventory = (result: ManagedMemberInspection): boolean => {
+  const selection = result.selection;
+  return (
+    result.metadata.status === "complete" &&
+    (selection === undefined ||
+      (selection.type_names.length === 0 &&
+        selection.method_tokens.length === 0 &&
+        selection.type_offset === 0 &&
+        selection.next_type_offset === null &&
+        selection.returned_types === selection.total_matching_types))
+  );
+};
+
 /** Compare managed members with constrained exact and structural identities. */
 export const compareManagedMembers = (
   left: ManagedMemberComparisonSide,
@@ -222,8 +236,8 @@ export const compareManagedMembers = (
   const itemContext = {
     leftEvidenceId: left.evidenceId,
     rightEvidenceId: right.evidenceId,
-    leftComplete: left.result.metadata.status === "complete",
-    rightComplete: right.result.metadata.status === "complete",
+    leftComplete: completeMemberInventory(left.result),
+    rightComplete: completeMemberInventory(right.result),
   };
   const methodItems = buildMethodItems(methodMatches, itemContext);
   const fieldItems = buildFieldItems(fieldMatches, itemContext);

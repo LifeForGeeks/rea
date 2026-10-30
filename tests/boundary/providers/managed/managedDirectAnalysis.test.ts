@@ -43,6 +43,32 @@ describe("managed direct-analysis path boundary", () => {
       },
     });
 
+    const selection = {
+      type_names: ["Fixture.Program"],
+      method_tokens: ["0x06000001"],
+      include_method_bodies: false,
+      type_offset: 0,
+      type_limit: 1,
+    };
+    const selectedEvidence = parseEvidence(
+      await runProviderAnalysis(path, "inspect_managed_members", selection),
+    );
+    expect(selectedEvidence).toMatchObject({
+      parameters: selection,
+      normalized_result: {
+        selection: {
+          ...selection,
+          total_matching_types: 1,
+          returned_types: 1,
+          next_type_offset: null,
+        },
+        types: [{ full_name: "Fixture.Program" }],
+        methods: [{ token: "0x06000001", body: { status: "unavailable" } }],
+        call_edges: [],
+        field_accesses: [],
+      },
+    });
+
     const boundaryEvidence = parseEvidence(
       await runProviderAnalysis(path, "inspect_managed_native_boundaries", {}),
     );

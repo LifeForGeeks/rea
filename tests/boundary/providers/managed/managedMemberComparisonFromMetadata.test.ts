@@ -201,7 +201,110 @@ describe("managed member comparison uncertainty", () => {
       right_status: "partial",
     });
   });
+});
 
+describe("managed member comparison of selected inventories", () => {
+  it.each([
+    { type_names: ["Missing.Type"], method_tokens: [], type_offset: 0 },
+    { type_names: [], method_tokens: ["0x06000002"], type_offset: 0 },
+    { type_names: [], method_tokens: [], type_offset: 2 },
+  ])("does not infer absence outside a selected inventory: %j", (scope) => {
+    const full = inspect(buildManagedPeFixture(), "/tmp/full.dll");
+    const selected = inspect(buildManagedPeFixture(), "/tmp/selected.dll");
+    const scoped = {
+      ...selected,
+      result: {
+        ...selected.result,
+        types: [],
+        methods: [],
+        fields: [],
+        member_refs: [],
+        call_edges: [],
+        field_accesses: [],
+        selection: {
+          ...scope,
+          include_method_bodies: true,
+          type_limit: 1,
+          total_matching_types: scope.type_offset,
+          returned_types: 0,
+          next_type_offset: null,
+        },
+        coverage: { ...selected.result.coverage, state: "partial" as const },
+      },
+    };
+    expect(scoped.result.metadata.status).toBe("complete");
+
+    for (const [left, right] of [
+      [full, scoped],
+      [scoped, full],
+    ] as const) {
+      const comparison = compareManagedMembers(left, right);
+      expect(comparison.summary).toMatchObject({
+        added: 0,
+        removed: 0,
+        unknown: 2,
+      });
+      expect(comparison.coverage.status).toBe("partial");
+      for (const member of [...comparison.methods, ...comparison.fields])
+        expect(member).toMatchObject({
+          status: "unknown",
+          limitations: [expect.stringContaining("absence was not observed")],
+        });
+    }
+  });
+
+  it("preserves observed absence when only bodies are omitted from complete inventories", () => {
+    const left = inspect(buildManagedPeFixture(), "/tmp/body-only-left.dll");
+    const right = inspect(
+      buildManagedPeFixture({
+        methodName: "DifferentMethod",
+        fieldSignature: Buffer.from([0x06, 0x0e]),
+      }),
+      "/tmp/body-only-right.dll",
+    );
+    const metadataOnly = {
+      ...right,
+      result: {
+        ...right.result,
+        methods: right.result.methods.map((method) => ({
+          ...method,
+          body: {
+            ...method.body,
+            status: "unavailable" as const,
+            il_sha256: null,
+            normalized_il_sha256: null,
+            anchors: [],
+          },
+        })),
+        call_edges: [],
+        field_accesses: [],
+        selection: {
+          type_names: [],
+          method_tokens: [],
+          include_method_bodies: false,
+          type_offset: 0,
+          type_limit: null,
+          total_matching_types: right.result.types.length,
+          returned_types: right.result.types.length,
+          next_type_offset: null,
+        },
+        coverage: { ...right.result.coverage, state: "partial" as const },
+      },
+    };
+    expect(compareManagedMembers(left, metadataOnly).summary).toMatchObject({
+      added: 2,
+      removed: 2,
+      unknown: 0,
+    });
+    expect(compareManagedMembers(metadataOnly, left).summary).toMatchObject({
+      added: 2,
+      removed: 2,
+      unknown: 0,
+    });
+  });
+});
+
+describe("managed member comparison of ambiguous field signatures", () => {
   it("does not guess ambiguous field signature matches", () => {
     const left = inspect(buildManagedPeFixture(), "/tmp/left.dll");
     const leftField = left.result.fields[0];

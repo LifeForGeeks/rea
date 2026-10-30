@@ -4,6 +4,52 @@ import { digestSchema } from "../digests.js";
 const tokenSchema = z.string().regex(/^0x[0-9a-f]{8}$/u);
 const offsetSchema = z.number().int().min(0);
 
+/** Caller-selected metadata scope; omitted options preserve full inspection. */
+export const managedMemberSelectionOptionsSchema = z.strictObject({
+  type_names: z
+    .array(z.string().min(1))
+    .min(1)
+    .optional()
+    .describe(
+      "Exact full type names; combined with method_tokens by intersection. Empty arrays are invalid.",
+    ),
+  method_tokens: z
+    .array(z.string().regex(/^0x06[0-9a-f]{6}$/u))
+    .min(1)
+    .optional()
+    .describe(
+      "Exact lowercase build-local MethodDef tokens; includes declaring types. Empty arrays are invalid.",
+    ),
+  include_method_bodies: z
+    .boolean()
+    .optional()
+    .describe(
+      "Decode selected method bodies and relationships (default true); false returns metadata and signatures only.",
+    ),
+  type_offset: z
+    .number()
+    .int()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .describe(
+      "Zero-based offset into matching types in metadata row order (default 0).",
+    ),
+  type_limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .describe(
+      "Maximum matching types to return; omitted means all remaining types, subject to the inspection resource budget.",
+    ),
+});
+
+export type ManagedMemberSelectionOptions = z.infer<
+  typeof managedMemberSelectionOptionsSchema
+>;
+
 /** A 16-byte CLI metadata GUID without RFC 4122 version/variant restrictions. */
 export const cliMetadataGuidSchema = z
   .string()
@@ -151,7 +197,7 @@ const managedInstructionAnchorSchema = z.object({
 });
 
 const managedMethodBodySchema = z.object({
-  status: z.enum(["present", "partial", "absent", "malformed"]),
+  status: z.enum(["present", "partial", "absent", "malformed", "unavailable"]),
   header_format: z.enum(["tiny", "fat", "none", "unknown"]),
   rva: z.number().int().min(0).max(0xffff_ffff),
   file_offset: offsetSchema.nullable(),
@@ -419,6 +465,22 @@ export const managedMemberInspectionSchema = z.object({
     requires_artifact_sha256: digestSchema,
     requires_mvid: cliMetadataGuidSchema.nullable(),
   }),
+  selection: z
+    .object({
+      type_names: z.array(z.string()),
+      method_tokens: z.array(tokenSchema),
+      include_method_bodies: z.boolean(),
+      type_offset: offsetSchema,
+      type_limit: z.number().int().min(1).nullable(),
+      total_matching_types: offsetSchema
+        .nullable()
+        .describe(
+          "Matching types before pagination, or null when malformed metadata prevents a complete count.",
+        ),
+      returned_types: offsetSchema,
+      next_type_offset: offsetSchema.nullable(),
+    })
+    .optional(),
   types: z.array(managedTypeSchema),
   fields: z.array(managedFieldSchema),
   methods: z.array(managedMethodSchema),

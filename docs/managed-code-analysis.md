@@ -52,6 +52,36 @@ reports `resource-limit` with unavailable or partial coverage; omitted facts do
 not become empty observations. Ambiguous PE section mappings are rejected
 rather than interpreted according to section order.
 
+### Targeted member inspection
+
+`inspect_managed_members` accepts `type_names` (exact full names),
+`method_tokens` (exact lowercase `0x06` MethodDef tokens),
+`include_method_bodies` (default `true`), `type_offset` (default `0`), and
+`type_limit` (a positive integer). Omit all options for the full inspection.
+Empty filter arrays are rejected. When both filters are present they intersect;
+method-only selection includes each selected method's declaring type.
+
+Types are paged in metadata row order after filtering. The optional `selection`
+result records the effective request, matching type count before pagination,
+returned type count, and `next_type_offset`. A null matching count means the
+metadata could not establish an exhaustive count. Paging counts types, not
+methods or bytes; the same representation budget still applies to a selected
+type with many members. Scoped results report partial inventory coverage and
+cannot establish absence elsewhere in the assembly.
+
+Set `include_method_bodies: false` to discover metadata and signatures without
+decoding CIL. Method bodies then have status `unavailable`, with no body hashes,
+anchors, call edges, or field accesses inferred. This is distinct from observing
+a method with no body. Caller selections remain in Evidence parameters.
+
+The CLI exposes matching flags; repeat `--type-names` or `--method-tokens` for
+multiple values:
+
+```sh
+rea inspect-managed-members /absolute/Example.dll --type-names Example.Program --include-method-bodies=false --type-limit 1 --json
+rea inspect-managed-members /absolute/Example.dll --method-tokens 0x06000001 --json
+```
+
 ## Analysis objective
 
 REA's managed-code track is intended to answer five different questions without

@@ -11,6 +11,7 @@ import { logCliCommand } from "../cliLogging.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { registerProjectManagedApplicationGraph } from "./managedProjectGraphCommand.js";
+import { managedMemberSelectionOptionsSchema } from "../domain/managed/managedArtifact.js";
 
 export const registerManagedCommands = (
   cli: CliInstance,
@@ -54,9 +55,38 @@ const registerInspectManagedMembers = (
     args: z.object({
       path: z.string().describe("Managed PE executable or assembly path"),
     }),
-    run: ({ args }) =>
+    options: z.object({
+      "type-names": managedMemberSelectionOptionsSchema.shape.type_names,
+      "method-tokens": managedMemberSelectionOptionsSchema.shape.method_tokens,
+      "include-method-bodies":
+        managedMemberSelectionOptionsSchema.shape.include_method_bodies,
+      "type-offset": managedMemberSelectionOptionsSchema.shape.type_offset,
+      "type-limit": managedMemberSelectionOptionsSchema.shape.type_limit,
+    }),
+    run: ({ args, options }) =>
       logCliCommand(logger, "inspect-managed-members", () =>
-        runProviderAnalysis(args.path, "inspect_managed_members", {}, logger),
+        runProviderAnalysis(
+          args.path,
+          "inspect_managed_members",
+          {
+            ...(options["type-names"] === undefined
+              ? {}
+              : { type_names: options["type-names"] }),
+            ...(options["method-tokens"] === undefined
+              ? {}
+              : { method_tokens: options["method-tokens"] }),
+            ...(options["include-method-bodies"] === undefined
+              ? {}
+              : { include_method_bodies: options["include-method-bodies"] }),
+            ...(options["type-offset"] === undefined
+              ? {}
+              : { type_offset: options["type-offset"] }),
+            ...(options["type-limit"] === undefined
+              ? {}
+              : { type_limit: options["type-limit"] }),
+          },
+          logger,
+        ),
       ),
   });
 };

@@ -7,6 +7,7 @@ import {
 } from "../../domain/managed/managedReconstruction.js";
 import { managedMemberInspectionSchema } from "../../domain/managed/managedArtifact.js";
 import { createEvidence } from "../../domain/evidence.js";
+import { jsonValueSchema } from "../../domain/jsonValue.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { importManagedReconstructionEvidence } from "./ManagedReconstructionService.js";
 
@@ -82,7 +83,7 @@ describe("managed decompiler reconstruction import", () => {
       {
         operation: "inspect_managed_members",
         parameters: {},
-        result: partial,
+        result: jsonValueSchema.parse(partial),
         rawResult: null,
         limitations: partial.limitations,
       },
@@ -148,12 +149,12 @@ describe("managed reconstruction input diagnostics", () => {
     const malformed = createEvidence(undefined, input.static_members.provider, {
       operation: "inspect_managed_members",
       parameters: {},
-      result: {
+      result: jsonValueSchema.parse({
         ...managedMemberInspectionSchema.parse(
           input.static_members.normalized_result,
         ),
         artifact: { sha256: 7 },
-      },
+      }),
       rawResult: null,
     });
     const result = importManagedReconstructionEvidence({
